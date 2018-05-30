@@ -1,11 +1,13 @@
-#!/usr/bin/env python 
+#!/usr/bin/python2
 
-import socket, select, struct
 from random import randint
+import socket, select, struct
 
 from messages import c2c_pb2
 from messages import c2s_pb2
 from messages import metaMessage_pb2
+import binascii
+
 
 HOST = "0.0.0.0"
 PORT = 5566
@@ -13,6 +15,50 @@ PORT = 5566
 SESSIONS = {}
 PAIRS = {}
 LIMBO = []
+num_count = 0
+flag_start=False
+
+command_list_back=[
+    "00b2013c10",
+    "01000711c8008f5f01007e236c29acba9000",
+    "0084000008",
+    "72c369a66fb807bb9000",
+    "0082000208926dbd8fa8bde15f",
+    "9000",
+    "80ca000009",
+    "90800960a7f716c6b49000",
+    "00b2028410",
+    "0711010831061500000000010000c8f49000",
+    "805003020b01000000c8200041599997",
+    "000162af0036000320010084176ad79000",
+    "80dc013b1001000711c800c75e01007e236c2b7429",
+    "9000",
+    "80dc0284100711010831061500000000010000c8f4",
+    "9000",
+    "805401000f000000572018031316432966cbc863",
+    "c630c2c8abcc913b9000"
+    ]
+
+command_list=[
+    "12090800120500b2013c10",
+    "12160801121201000711c800f75601007e236d396c1a9000",
+    "1209080012050084000008",
+    "120e0801120a5f9bd1bb861be39a9000",
+    "12110800120d00820002083565ae1403884fa1",
+    "1206080112029000",
+    "12090800120580ca000009",
+    "120f0801120b90800960a7f716c6b49000",
+    "12090800120500b2028410",
+    "1216080112120711010831061500000000010000c8f49000",
+    "121408001210805003020b01000000c8200041599997",
+    "12150801121100015a1700410003200100f8ada62b9000",
+    "12190800121580dc013b1001000711c8002f5601007e236d44984b",
+    "1206080112029000",
+    "12190800121580dc0284100711010831061500000000010000c8f4",
+    "1206080112029000",
+    "121808001214805401000f00000062201803132104383f3f3b5d",
+    "120e0801120a570ad7dadccda70d9000"
+    ]
 
 STATUS_CODES = {
     c2c_pb2.Status.KEEPALIVE_REQ   : "Keepalive request",
@@ -94,6 +140,7 @@ def prettyPrintProtobuf(msg, sock):
         )
     elif mtype == "NFCData":
         mNfc = msg.NFCData
+        print NFC_CODES[mNfc.data_source] + ":" + ''.join(x.encode('hex') for x in mNfc.data_bytes)
         print """{} => {}: NFCData
     DataSource: {}
     data_bytes: {}""".format(
@@ -102,8 +149,6 @@ def prettyPrintProtobuf(msg, sock):
             NFC_CODES[mNfc.data_source],
             ''.join(x.encode('hex') for x in mNfc.data_bytes)
         )
-
-
 ##### Message Creation Functions
 ### Session Messages
 def getSessionMessage(code_tuple):
@@ -230,13 +275,21 @@ def HandleAnticolMessage(message, sock):
     print "Got Anticol message. This should not happen. Doing nothing."
 
 def HandleDataMessage(message, sock):
+    wrapper11 = metaMessage_pb2.Wrapper()
+    wrapper11.ParseFromString(message.Data.blob)
+    mtype = wrapper11.WhichOneof('message')
+    if mtype == "NFCData":
+        sDataSource = NFC_CODES[wrapper11.NFCData.data_source]
+        if sDataSource == 'Card' or sDataSource == 'Reader':
+            ChangeData(message)
+        
     errcode = None
     peer = getPeerSocket(sock)
     if peer is not None:
         try:
-            print "Forwarding message"
+#             print "Forwarding message"
             sendMessage(message, peer)
-            print "Notifying sender"
+#             print "Notifying sender"
             errcode = c2s_pb2.Data.ERROR_NOERROR
         except Exception, e:
             print "Error while trying to forward data message: ", e
@@ -264,6 +317,57 @@ def HandleSessionMessage(message, sock):
     elif message.opcode == c2s_pb2.Session.SESSION_LEAVE:
         return getSessionMessage(LeaveSession(message.session_secret, sock))
 
+def changeHexMessage(sHexMessage):
+    global num_count
+    global flag_start
+    
+    print("shexmessage :"+str(sHexMessage))
+    print("num_count:"+str(num_count))
+    print("flag_start :"+str(flag_start))
+    print("\n")
+    if '00b2013c10' in sHexMessage :
+        
+        flag_start=True
+        num_count=0
+
+    if flag_start :
+        num_count=num_count+1
+    else:
+        return sHexMessage 
+    if num_count%2 ==1 :
+        
+        return sHexMessage
+    else:
+        if num_count== len(command_list):
+            flag_start=False
+        temp_comm=command_list[num_count-1]
+        print "ChangedData:" + temp_comm
+        return temp_comm
+        
+    
+def ChangeData(message):
+#     print message.Data.blob
+#     for x in message.Data.blob:
+#         print 
+    
+#     print '--------------' +''.join(x.encode('hex') for x in message.Data.blob)
+    sHexMessage = ''.join(x.encode('hex') for x in message.Data.blob)
+    sChangedHexMessage = changeHexMessage(sHexMessage);
+
+    
+     
+#     bytesTT = ""
+#     for x in xrange(0, len(sChangedHexMessage), 2):
+#         bytesTT += chr(int(sChangedHexMessage[x: x+ 2], 16))
+#     bytesTT = bytes.fr
+     
+    bChangedBytesMessage = binascii.unhexlify(sChangedHexMessage)
+#     print '==============' +''.join(x.encode('hex') for x in bChangedBytesMessage)
+#     print("--a")
+#     print '==============' + type(message.Data.blob) + '==============' + type(bChangedBytesMessage)
+    message.Data.blob = bChangedBytesMessage
+#     print('--b')
+    pass
 
 def HandleMessage(message, sock):
     mtype = message.WhichOneof('message')
@@ -284,44 +388,41 @@ def HandleMessage(message, sock):
 if __name__ == "__main__":
      
     CONNECTION_LIST = []    # list of socket clients
-    RECV_BUFFER = 4096 # Advisable to keep it as an exponent of 2
-        
+    RECV_BUFFER = 4096      # Advisable to keep it as an exponent of 2
+    # establish socket contact    
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    
+    # set socket option mode, when socket has been closed, the port number will be used again.
     server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     # Set TCP Nodelay (currently bugged, enable only for debugging)
     server_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-
+    # bind host and port(bind client)
     server_socket.bind((HOST, PORT))
+    # The maximum number of listeners is 10, client cannot exceed 10
     server_socket.listen(10)
-
     # Add server socket to the list of readable connections
     CONNECTION_LIST.append(server_socket)
 
     print "NFCGate server started on port " + str(PORT)
 
     while 1:
-        # Get the list sockets which are ready to be read through select
-        read_sockets,write_sockets,error_sockets = select.select(CONNECTION_LIST,[],[])
-
-
+        # The "select" function blocks the process until the CONNECTION_LIST socket in is triggered 
+        # (in this example, the socket receives a handshake signal from the client that becomes readable 
+        # and satisfies the "readable" condition of the Select function), Read_ Sockets returns a triggered socket (server socket)
+        read_sockets,write_sockets,error_sockets = select.select(CONNECTION_LIST,[],[]) 
         for sock in read_sockets:
-            
-            #New connection
+            # New connection
             if sock == server_socket:
                 # Handle the case in which there is a new connection recieved through server_socket
-                sockfd, addr = server_socket.accept()
-
+                sockfd, addr = server_socket.accept() # sockfd is client's socket, addr include client's ip and port
                 sockfd.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-
                 CONNECTION_LIST.append(sockfd)
                 print "Client (%s, %s) connected" % addr
                 
-            #Some incoming message from a client
+            # Some incoming message from a client
             else:
                 # Data recieved from client, process it
                 try:
-                    #In Windows, sometimes when a TCP program closes abruptly,
+                    # In Windows, sometimes when a TCP program closes abruptly,
                     # a "Connection reset by peer" exception will be thrown
                     wrapperMsg = RecvOneMsg(sock)
                     if wrapperMsg:
@@ -330,12 +431,12 @@ if __name__ == "__main__":
                         sendMessage(reply, sock)
 
                 # client disconnected, so remove from socket list
-                except Exception, e:
+                except Exception, e: # 'e' is exceptional value, Exception is the type of exception
                     # broadcast_data(sock, "Client (%s, %s) is offline" % addr)
                     print "Client (%s, %s) is offline" % addr
                     sock.close()
                     CONNECTION_LIST.remove(sock)
-                    try:
+                    try: # I don't know.
                         peer = PAIRS[sock]
                         for secret in SESSIONS:
                             if sock in SESSIONS[secret]:
@@ -346,6 +447,7 @@ if __name__ == "__main__":
                         LIMBO.append(peer)
                         NotifySessionStatus(c2s_pb2.Session.SESSION_PEER_LEFT, peer)
                     except KeyError:
+                        print e
                         pass
                     continue
         
